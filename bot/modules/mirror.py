@@ -12,7 +12,6 @@ import shutil
 
 from telegram.ext import CommandHandler
 from telegram import InlineKeyboardMarkup
-from fnmatch import fnmatch
 
 from bot import Interval, INDEX_URL, BUTTON_FOUR_NAME, BUTTON_FOUR_URL, BUTTON_FIVE_NAME, BUTTON_FIVE_URL, \
                 BUTTON_SIX_NAME, BUTTON_SIX_URL, BLOCK_MEGA_FOLDER, BLOCK_MEGA_LINKS, VIEW_LINK, aria2, \
@@ -88,9 +87,9 @@ class MirrorListener(listeners.MirrorListeners):
                     path = m_path + ".zip"
                     LOGGER.info(f'Zip: orig_path: {m_path}, zip_path: {path}')
                     if pswd is not None:
-                        subprocess.run(["7z", "a", "tzip", "-mx=0", f"-p{pswd}", path, m_path])
+                        subprocess.run(["7z", "a", "-mx=0", f"-p{pswd}", path, m_path])
                     else:
-                        subprocess.run(["7z", "a", "tzip", "-mx=0", path, m_path])
+                        subprocess.run(["7z", "a", "-mx=0", path, m_path])
                 else:
                     path = fs_utils.tar(m_path)
             except FileNotFoundError:
@@ -112,8 +111,9 @@ class MirrorListener(listeners.MirrorListeners):
                 if os.path.isdir(m_path):
                     for dirpath, subdir, files in os.walk(m_path, topdown=False):
                         for filee in files:
-                            suffixes = (".part1.rar", ".part01.rar", ".part001.rar", ".part0001.rar")
-                            if (filee.endswith(".rar") and "part" not in filee) or filee.endswith(suffixes):
+                            if re.search(r'\.part0*1.rar$', filee) or re.search(r'\.7z.0*1$', filee) \
+                               or (filee.endswith(".rar") and not re.search(r'\.part\d+.rar$', filee)) \
+                               or re.search(r'\.zip.0*1$', filee):
                                 m_path = os.path.join(dirpath, filee)
                                 if pswd is not None:
                                     result = subprocess.run(["7z", "x", f"-p{pswd}", m_path, f"-o{dirpath}"])
@@ -123,7 +123,8 @@ class MirrorListener(listeners.MirrorListeners):
                                     LOGGER.warning('Unable to extract archive!')
                                 break
                         for filee in files:
-                            if filee.endswith(".rar") or fnmatch(filee, "*.r[0-9]") or fnmatch(filee, "*.r[0-9]*"):
+                            if filee.endswith(".rar") or re.search(r'\.r\d+$', filee) \
+                               or re.search(r'\.7z.\d+$', filee) or re.search(r'\.zip.\d+$', filee):
                                 del_path = os.path.join(dirpath, filee)
                                 os.remove(del_path)
                     path = f'{DOWNLOAD_DIR}{self.uid}/{name}'
@@ -214,14 +215,18 @@ class MirrorListener(listeners.MirrorListeners):
                 uname = f'<a href="tg://user?id={self.message.from_user.id}">{self.message.from_user.first_name}</a>'
             count = len(files)
             if self.message.chat.type == 'private':
-                msg = f'<b>Name:</b> <code>{link}</code>\n'
-                msg += f'<b>Total Files:</b> {count}'
+                msg = f'<b>Name: </b><code>{link}</code>\n'
+                msg += f'<b>Total Files: </b>{count}'
+                if typ != 0:
+                    msg += f'\n<b>Corrupted Files: </b>{typ}'
                 sendMessage(msg, self.bot, self.update)
             else:
                 chat_id = str(self.message.chat.id)[4:]
-                msg = f"<b>Name:</b> <a href='https://t.me/c/{chat_id}/{self.uid}'>{link}</a>\n"
-                msg += f'<b>Total Files:</b> {count}\n'
-                msg += f'cc: {uname}\n\n'
+                msg = f"<b>Name: </b><a href='https://t.me/c/{chat_id}/{self.uid}'>{link}</a>\n"
+                msg += f'<b>Total Files: </b>{count}\n'
+                if typ != 0:
+                    msg += f'<b>Corrupted Files: </b>{typ}\n'
+                msg += f'<b>cc: </b>{uname}\n\n'
                 fmsg = ''
                 for index, item in enumerate(list(files), start=1):
                     msg_id = files[item]
@@ -292,7 +297,7 @@ class MirrorListener(listeners.MirrorListeners):
             else:
                 uname = f'<a href="tg://user?id={self.message.from_user.id}">{self.message.from_user.first_name}</a>'
             if uname is not None:
-                msg += f'\n\ncc: {uname}'
+                msg += f'\n\n<b>cc: </b>{uname}'
             try:
                 fs_utils.clean_download(download_dict[self.uid].path())
             except FileNotFoundError:
@@ -430,9 +435,9 @@ def _mirror(bot, update, isTar=False, extract=False, isZip=False, isQbit=False, 
             sendMessage(res, bot, update)
             return
         if TAR_UNZIP_LIMIT is not None:
-            result = bot_utils.check_limit(size, TAR_UNZIP_LIMIT)
-            if result:
-                msg = f'Failed, Tar/Unzip limit is {TAR_UNZIP_LIMIT}.\nYour File/Folder size is {get_readable_file_size(size)}.'
+            LOGGER.info('Checking File/Folder Size...')
+            if size > TAR_UNZIP_LIMIT * 1024**3:
+                msg = f'Failed, Tar/Unzip limit is {TAR_UNZIP_LIMIT}GB.\nYour File/Folder size is {get_readable_file_size(size)}.'
                 sendMessage(msg, bot, update)
                 return
         LOGGER.info(f"Download Name: {name}")
